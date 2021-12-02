@@ -14,15 +14,31 @@ def allowed_keys():
     return ['pi0', 'gamma']
 
 
-def data_file(key, energy):
+def data_file(key, energy, path=None):
+    if path is None:
+        path = data_path()
     assert key in allowed_keys()
     assert energy in allowed_energies()
-    return '/'.join([data_path(), f'clusters_{key}_mom_{energy}_MeV.dat'])
+    return '/'.join([path, f'clusters_{key}_mom_{energy}_MeV.dat'])
 
 
-def parse_data(key, energy):
+def build_cluster(clu, size=5):
+    clu = np.array(clu)
+    bclu = np.zeros((size, size))
+    eout = 0.
+    idx = np.argmax(clu[:, 0])
+    cz, cp = clu[idx, 1:]
+    for e, z, phi in clu:
+        if np.abs(z - cz) < 3 and np.abs(phi - cp) < 3:
+            bclu[int(z - cz + 2), int(phi - cp + 2)] = e
+        else:
+            eout += e
+    return clu, eout / np.sum(clu[:, 0])
+
+
+def parse_data(key, energy, path):
     oneclu, twoclu = [], []
-    with open(data_file(key, energy), 'r') as ifile:
+    with open(data_file(key, energy, path), 'r') as ifile:
         clusters, clu, cluidx = [], [], None
         ifile.readline()
         eventcnt = 0
@@ -30,8 +46,8 @@ def parse_data(key, energy):
         for lnum, line in enumerate(ifile):
             if line.strip() == 'new event':
                 eventcnt += 1
-                if len(clu) == 25:
-                    clusters.append(clu)
+                if clu:
+                    clusters.append(build_cluster(clu))
 
                 if len(clusters) == 2:
                     twoclu.append(clusters)
@@ -44,8 +60,8 @@ def parse_data(key, energy):
                 if idx == cluidx:
                     clu.append([eclu, zidx, phidx])
                 else:
-                    if len(clu) == 25:
-                        clusters.append(clu)
+                    if clu:
+                        clusters.append(build_cluster(clu))
                     clu = [[eclu, zidx, phidx]]
                     cluidx = idx
     return np.array(oneclu), np.array(twoclu), eventcnt

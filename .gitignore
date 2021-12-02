@@ -2,3 +2,6 @@ csv
 hdf
 .ipynb_checkpoints
 .vscode
+Data
+Data5x5
+*.pyc
