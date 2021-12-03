@@ -2,3 +2,5 @@ csv
 hdf
 .ipynb_checkpoints
 .vscode
+__pycache__
+*.pyc
