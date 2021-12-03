@@ -3,11 +3,13 @@ import matplotlib.pyplot as plt
 
 
 def data_path():
-    return '/media/vitaly/4759e668-4a2d-4997-8dd2-eb4d25313d90/vitaly/CTau/Data'
+    return '/'.join(['media', 'vitaly', '4759e668-4a2d-4997-8dd2-eb4d25313d90',
+                     'vitaly', 'CTau', 'Data'])
 
 
 def allowed_energies():
-    return [0, 100, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000]
+    return [0, 100, 250, 500, 750, 1000, 1250,
+            1500, 1750, 2000, 2250, 2500, 2750, 3000]
 
 
 def allowed_keys():
