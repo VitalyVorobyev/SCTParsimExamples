@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 
 def data_path():
@@ -27,30 +28,41 @@ def build_cluster(clu, size=5):
     bclu = np.zeros((size, size))
     eout = 0.
     idx = np.argmax(clu[:, 0])
-    cz, cp = clu[idx, 1:]
-    for e, z, phi in clu:
-        if np.abs(z - cz) < 3 and np.abs(phi - cp) < 3:
-            bclu[int(z - cz + 2), int(phi - cp + 2)] = e
+    cz, cp = map(int, clu[idx, 1:])
+    evals = clu[:, 0]
+    zvals = clu[:, 1].astype(int) - cz + size // 2
+    pvals = clu[:, 2].astype(int) - cp + size // 2
+    for e, z, phi in zip(evals, zvals, pvals):
+        if z > 0 and z < size and phi > 0 and phi < size:
+            bclu[z, phi] = e
         else:
             eout += e
-    return clu, eout / np.sum(clu[:, 0])
+    print(f'bclu shape: {bclu.shape}, eout: {eout:.3f}, eclu: {bclu.sum():.3f}')
+    return bclu, eout / bclu.sum()
 
 
-def parse_data(key, energy, path):
+def parse_data(key, energy, path, clusize=5, evtmax=10**10):
     oneclu, twoclu = [], []
-    with open(data_file(key, energy, path), 'r') as ifile:
+    fname = data_file(key, energy, path)
+    assert os.path.isfile(fname)
+    with open(fname, 'r') as ifile:
         clusters, clu, cluidx = [], [], None
         ifile.readline()
         eventcnt = 0
 
-        for lnum, line in enumerate(ifile):
+        for _, line in enumerate(ifile):
             if line.strip() == 'new event':
                 eventcnt += 1
+                if eventcnt > evtmax:
+                    break
                 if clu:
-                    clusters.append(build_cluster(clu))
+                    nclu, leaks = build_cluster(clu, clusize)
+                    if leaks > 0.05:
+                        print(f'leaks: {leaks:.3f}')
+                    clusters.append(nclu)
 
-                if len(clusters) == 2:
-                    twoclu.append(clusters)
+                if len(clusters) > 1:
+                    twoclu.append(clusters[:2])
                 elif clusters:
                     oneclu.append(clusters[0])
                 clusters, clu, cluidx = [], [], None
@@ -61,7 +73,10 @@ def parse_data(key, energy, path):
                     clu.append([eclu, zidx, phidx])
                 else:
                     if clu:
-                        clusters.append(build_cluster(clu))
+                        nclu, leaks = build_cluster(clu, clusize)
+                        if leaks > 0.05:
+                            print(f'leaks: {leaks:.3f}')
+                        clusters.append(nclu)
                     clu = [[eclu, zidx, phidx]]
                     cluidx = idx
     return np.array(oneclu), np.array(twoclu), eventcnt
@@ -86,3 +101,8 @@ def draw_energy_spectrum(eclu, key, epcl, xlbl):
     plt.xlabel(f'{xlbl} (GeV)', fontsize=14)
     plt.tight_layout()
     plt.savefig(f'plots/{key}_{epcl}_{xlbl.replace(" ", "_")}.png')
+
+
+if __name__ == '__main__':
+    cone, ctwo, neve = parse_data('pi0', 2000, './Data', clusize=5, evtmax=2)
+    # print(cone[0])
