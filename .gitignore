@@ -1,8 +1,8 @@
 csv
 hdf
+npy
 .ipynb_checkpoints
 .vscode
-__pycache__
-*.pyc
 Data
 Data5x5
+*.pyc
