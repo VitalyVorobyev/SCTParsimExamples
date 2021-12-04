@@ -1,5 +1,6 @@
 csv
 hdf
+npy
 .ipynb_checkpoints
 .vscode
 Data

@@ -1,14 +1,16 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 
 def data_path():
     return '/media/vitaly/4759e668-4a2d-4997-8dd2-eb4d25313d90/vitaly/CTau/Data'
 
 
 def allowed_energies():
-    return [0, 100, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000]
+    return [0, 100, 250, 500, 750, 1000, 1250,
+            1500, 1750, 2000, 2250, 2500, 2750, 3000]
 
 
 def allowed_keys():
@@ -83,13 +85,14 @@ def cluster_to_matrix(clu, local=False):
     if local:
         e = clu[:-1]
         for row in range(size):
-            z[row * size:(row +  1) * size] = row
-            p[row * size:(row +  1) * size] = np.arange(size)
+            z[row * size:(row + 1) * size] = row
+            p[row * size:(row + 1) * size] = np.arange(size)
     else:
         e = clu[:-3]
         for row in range(size):
-            z[row * size:(row +  1) * size] = row - size // 2
-            p[row * size:(row +  1) * size] = np.arange(size) + clu[-1] - size // 2
+            z[row * size:(row + 1) * size] = row - size // 2
+            p[row * size:(row + 1) * size] =\
+                np.arange(size) + clu[-1] - size // 2
     return z, p, e
 
 
@@ -106,20 +109,24 @@ def draw_cluster(clu, fullgrid=True):
     plt.tight_layout()
 
 
-def draw_cluster_local(clu):
+def draw_cluster_local(clu, key):
     plt.figure(figsize=(8, 8))
     plt.xticks(range(5))
     plt.yticks(range(5))
+    plt.xlabel(r'Crystal $z$ index', fontsize=16)
+    plt.ylabel(r'Crystal $\phi$ index', fontsize=16)
     plt.grid()
     z, p, e = cluster_to_matrix(clu, local=True)
     plt.scatter(z, p, s=e * 2500)
     plt.tight_layout()
+    plt.savefig(f'plots/cluster_{key}.png')
 
 
-def draw_two_clusters(clu1, clu2):
+def draw_two_clusters(clu1, clu2, local=False):
     plt.figure(figsize=(12, 8))
-    plt.xlim((0, 120))
-    plt.ylim((0, 115))
+    if not local:
+        plt.xlim((0, 120))
+        plt.ylim((0, 115))
     plt.minorticks_on()
     plt.grid(which='both')
 
@@ -131,28 +138,53 @@ def draw_two_clusters(clu1, clu2):
 
 
 def draw_energy_spectrum(clusters, key, epcl, xlbl):
+    energy = np.sqrt(0.13957**2 + epcl**2 * 10**-6)
     plt.figure(figsize=(8, 6))
     plt.minorticks_on()
     plt.grid(which='both')
-    plt.hist(clusters[:,:-2].sum(axis=1), bins=100, histtype='step', label='Cluster energy')
-    plt.hist(clusters[:,-3], bins=100, histtype='step', label='Beyond 5x5')
-    plt.title(f'{key} {epcl} MeV', fontsize=16)
-    plt.xlabel(f'{xlbl} (GeV)', fontsize=14)
+    h, b, _ = plt.hist(clusters[:, :-2].sum(axis=1), bins=100,
+                       histtype='step', label='Cluster energy')
+    plt.hist(clusters[:, -3], bins=100, histtype='step', label='Beyond 5x5')
+    plt.ylim((0, 1.2 * np.max(h)))
+    plt.title(f'{key} {energy:.3f} MeV', fontsize=16)
+    plt.xlabel(f'{xlbl} (GeV)', fontsize=16)
     plt.legend()
     plt.tight_layout()
     plt.savefig(f'plots/{key}_{epcl}_{xlbl.replace(" ", "_")}.png')
 
 
-def draw_predictions(pred, labels, type1, type2, key):
-    plt.figure(figsize=(8, 6))
+def draw_predictions(pred, labels, key, type1='gamma', type2='pi0'):
+    rascore = roc_auc_score(labels, pred)
+    plt.figure(figsize=(9, 6))
     plt.minorticks_on()
-    plt.grid(which='both')
-    plt.hist(pred[labels==1], bins=100, histtype='step', label=type1)
-    plt.hist(pred[labels==0], bins=100, histtype='step', label=type2)
-    plt.legend()
-    plt.xlabel(f'Classifier score', fontsize=14)
+    plt.grid(which='major')
+    plt.grid(which='minor', linestyle=':')
+    plt.hist(pred[labels == 1], bins=100, histtype='step',
+             density=True, label=type1)
+    plt.hist(pred[labels == 0], bins=100, histtype='step',
+             density=True, label=type2)
+    plt.legend(fontsize=16)
+    plt.title(f'{key} ROC AUC Score = {rascore:.3f}', fontsize=16)
+    plt.xlabel('Classifier score', fontsize=16)
     plt.tight_layout()
     plt.savefig(f'plots/prediction_{key}.png')
+
+
+def preprocess_data(data):
+    X = data[:, :-2]
+    sums = X.sum(axis=1)
+    return X / sums.reshape(-1, 1), sums
+
+
+def make_data(pidata, gadata):
+    pidata0, _ = preprocess_data(pidata)
+    gadata0, _ = preprocess_data(gadata)
+    X = np.vstack((pidata0, gadata0))
+    y = np.concatenate((
+        np.zeros(pidata0.shape[0], dtype=int),
+        np.ones(gadata0.shape[0], dtype=int)
+    ))
+    return train_test_split(X, y, test_size=0.2, random_state=47)
 
 
 if __name__ == '__main__':
