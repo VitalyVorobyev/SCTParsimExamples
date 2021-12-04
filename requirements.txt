@@ -2,3 +2,5 @@ numpy
 matplotlib
 sklearn
 xgboost
+tables
+pandas
