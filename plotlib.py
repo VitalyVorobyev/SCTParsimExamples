@@ -31,9 +31,9 @@ def fit_plot(fcn, params, data, xlabel):
     return fig, ax, hist, errs, bins
 
 
-def plot_scatter(x1, x2, xlabel, ylabel):
+def plot_scatter(x1, x2, xlabel, ylabel, pltlabel=None):
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(x1, x2, s=1)
+    ax.scatter(x1, x2, s=1, label=pltlabel)
     ax.minorticks_on()
     ax.grid(which='major')
     ax.grid(which='minor', linestyle=':')
