@@ -111,7 +111,7 @@ def draw_cluster(clu, fullgrid=True):
 
 
 def draw_cluster_local(clu, key):
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(9, 8))
     plt.xticks(range(5))
     plt.yticks(range(5))
     plt.xlabel(r'Crystal $z$ index', fontsize=16)
@@ -119,6 +119,13 @@ def draw_cluster_local(clu, key):
     plt.grid()
     z, p, e = cluster_to_matrix(clu, local=True)
     plt.scatter(z, p, s=e * 2500)
+    plt.scatter(5, 2, s=clu[-1] * 2500, label='Beyond 5x5')
+
+    for i in range(6):
+        plt.plot([-0.5 + i, -0.5 + i], [-0.5, 4.5], 'k-', linewidth=1.5)
+        plt.plot([-0.5, 4.5], [-0.5 + i, -0.5 + i], 'k-', linewidth=1.5)
+
+    plt.legend(fontsize=20, loc='upper right')
     plt.tight_layout()
     plt.savefig(f'plots/cluster_{key}.png')
 

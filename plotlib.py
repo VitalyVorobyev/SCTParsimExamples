@@ -4,18 +4,20 @@ import matplotlib
 matplotlib.rcParams['font.size'] = 14
 
 
-def poisson_hist(data, figax=None, xlabel=None):
-    fig, ax = plt.subplots(figsize=(12, 8)) if figax is None else figax
+def poisson_hist(data, figax=None, xlabel=None, leglabel=None):
+    fig, ax = plt.subplots(figsize=(8, 6)) if figax is None else figax
     hist, bins = np.histogram(data, bins=100)
     errs = np.sqrt(hist)
     bins = 0.5 * (bins[1:] + bins[:-1])
     ax.errorbar(bins, hist, yerr=errs, linestyle='none',
-                marker='o', markersize=3)
+                marker='o', markersize=3, label=leglabel)
     ax.minorticks_on()
     ax.grid(which='major')
     ax.grid(which='minor', linestyle=':')
     ax.set_ylim((0, 1.05 * np.max(hist)))
     ax.set_xlim((bins[0], bins[-1]))
+    if leglabel:
+        ax.legend(fontsize=20)
     if xlabel is not None:
         ax.set_xlabel(xlabel, fontsize=18)
     fig.tight_layout()
