@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.rcParams['font.size'] = 16
+matplotlib.rcParams['font.size'] = 14
 from colors import kelly_gen
 import itertools
 

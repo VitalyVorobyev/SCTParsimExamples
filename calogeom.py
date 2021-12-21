@@ -87,7 +87,7 @@ def build_crystal(x, q, i, l, nphi, barrel=True, splitlvl=1):
     if not barrel and cry_phi_face_size(cry) / cry_theta_face_size(cry) > 4.:
         return build_crystal(x, q, i, l, nphi, barrel, splitlvl * 2)
 
-    return cry
+    return cry, splitlvl
 
 
 def make_crystal_surf(rho, tanf2, d):
@@ -146,50 +146,141 @@ def generate_barrel_ecl(rho, z0, l, r0, nphi, ntheta):
     
     offset = np.array([r0, 0., d_central_half])
     for itheta in range(ntheta):
-        cry = build_crystal(rho, q, itheta, l, nphi) + offset
+        cry = build_crystal(rho, q, itheta, l, nphi)[0] + offset
         for phirot in rotators:
             cry0 = phirot.apply(cry)
             crystals += [cry0, reflectz(cry0)]
 
-    crystals = np.array(crystals)
-    np.save('crystalls', crystals)
-    xy_calo_plot(crystals)
-    plt.show()
+    return np.array(crystals)
+
+
+def vec_phi(v):
+    return np.arctan2(v[1], v[0])
+
+
+def delta_phi(v1, v2):
+    dphi = vec_phi(v2) - vec_phi(v1)
+    if dphi > np.pi:
+        dphi -= 2. * np.pi
+    elif dphi < -np.pi:
+        dphi += 2. * np.pi
+    return dphi
+
+
+def closest_approach_point(line1, line2):
+    """ line1 = (s1, t1), line2 = (s2, t2) """
+    dir1 = line1[1] - line1[0]
+    dir2 = line2[1] - line2[0]
+    dirdot = dir1 @ dir2
+    assert np.sum(np.cross(dir1, dir2)**2) > 1e-8
+    return line1[0] + dir1 * (
+        (line1[0] - line2[0]) @ (dirdot * dir2 - dir1) / (1. - dirdot**2)
+    )
+
+
+def split_endcap_crystal(cry, splitlvl):
+    dphi = delta_phi(cry[5] - cry[1], cry[4] - cry[0])
+    phiax = vec_phi(crystal_axis(cry))
+    print(phiax)
+    focus = closest_approach_point((cry[0], cry[4]), (cry[1], cry[5]))
+    lines = [(cry[2 * i], cry[2 * i + 1]) for i in range(4)]
+
+    segment = []
+    for spl in range(splitlvl):
+        scry = np.empty((8, 3))
+        for j in range(4):
+            scry[2 * j] = (cry[2 * j] if spl else cry[2 * j + 1])
+    
+        phinorm = phiax - 0.5 * np.pi - dphi * (0.5 + (spl + 1) / splitlvl)
+        print(phinorm)
+        plane = (focus, np.array([np.cos(phinorm), np.sin(phinorm), 0.]))
+        scry[1::2] = np.vstack([plane_cross_line(plane, item).reshape(-1, 3)
+                                for item in lines])
+        segment.append(scry)
+    return np.array(segment)
+
+
+def plane_cross_line(plane, line):
+    """ plane = (vec, norm), line = (s, t) """
+    dire = line[1] - line[0]
+    dire /= np.sum(dire**2)
+    unorm = plane[1] / np.sum(plane[1]**2)
+    return line[0] + dire * unorm @ (plane[0] - line[0]) / (dire @ unorm)
 
 
 def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
+    phivec = np.linspace(0, 2.*np.pi, nphi)
     dphi = np.pi / nphi
     ymax = rho * np.cos(dphi)
     q = make_q(ymax, rho, ntheta)
     d = 2. * z0 * (1 - q) / (1 + q)
     q = make_q(ymax - d, rho, ntheta)
 
+    offset = np.array([r0, 0, 0.5 * d])
+    lendcap, rendcap = [], []
     for ith in range(1, ntheta):
-        crystall = build_crystal(z0 - 0.5 * d, q, ith, l, nphi)
-        if crystall[2, 1] < rhoin:
+        cry, splitlvl = build_crystal(z0 - 0.5 * d, q, ith, l, nphi)
+        print(f'theta {ith}: split {splitlvl}')
+        rot0 = -dphi / splitlvl + dphi
+        if cry[2, 1] < rhoin:
             continue
+        cry += offset  # defocusing
+
+        for spl in range(splitlvl):
+            for phi in phivec:
+                rotangle = rot0 - dphi * spl / splitlvl
+                rotator = transform.Rotation.from_euler('z', rotangle)
+                cry0 = rotator.apply(cry)
+                segment = split_endcap_crystal(cry0, splitlvl)
+                for segcry in segment:
+                    lsegcry = reflectz(segcry)
+                    rotator = transform.Rotation.from_euler('z', phi)
+                    rendcap.append(rotator.apply(segcry))
+                    lendcap.append(rotator.apply(lsegcry))
+
+    return np.array(lendcap), np.array(rendcap)
 
 
 cfg = {
-    'crystal_length_bar': 330,
+    'crystal_length': 330,
     'r_internal_bar': 1090,
     'z_calorimeter_bar': 1260,
-    'r_defocus_bar': 20,
+    'z_calorimeter_end': 1290,
+    'r_defocus': 20,
     'n_phi_crystals_bar': 114,
+    'n_phi_sectors_end': 19,
     'n_theta_half_crystals_bar': 19,
     'd_mylar_bar': 0.2,
     'd_teflon_bar': 0.05,
     'readout_box_bar': 60.0,
     'draw_readout_box_bar': 0,
+    'r_internal_end': 300.0,
 }
 
 
 if __name__ == '__main__':
-    generate_barrel_ecl(
+    barrel = generate_barrel_ecl(
         cfg['r_internal_bar'],
         cfg['z_calorimeter_bar'],
-        cfg['crystal_length_bar'],
-        cfg['r_defocus_bar'],
+        cfg['crystal_length'],
+        cfg['r_defocus'],
         cfg['n_phi_crystals_bar'],
-        cfg['n_theta_half_crystals_bar']
+        cfg['n_theta_half_crystals_bar'],
     )
+
+    lendcap, rendcap = generate_endcap_ecl(
+        cfg['r_internal_bar'],
+        cfg['z_calorimeter_end'],
+        cfg['crystal_length'],
+        cfg['r_defocus'],
+        cfg['n_phi_sectors_end'],
+        cfg['n_theta_half_crystals_bar'],
+        cfg['r_internal_end'],
+    )
+
+    np.save('barrel', barrel)
+
+    print(lendcap.shape)
+    print(rendcap.shape)
+    # xy_calo_plot(barrel)
+    # plt.show()
