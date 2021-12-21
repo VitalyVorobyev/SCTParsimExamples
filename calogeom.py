@@ -1,11 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import transform
-from caloplot import xy_calo_plot
+from caloplot import xy_calo_plot, encap_plot
 
 
-def make_q(z0, rho, ntheta):
-    return (np.hypot(z0 / rho, 1.) - z0 / rho)**(1./ntheta)
+def make_q(x, ntheta):
+    return (np.hypot(x, 1.) - x)**(1. / ntheta)
+
+
+# def make_q_endcap(ymax, z0, ntheta):
+#     return (np.hypot(ymax / z0, 1.) - ymax / z0)**(1./ntheta)
 
 
 def distance_sq_bw_line_and_point(p1, p2, s):
@@ -14,38 +18,38 @@ def distance_sq_bw_line_and_point(p1, p2, s):
 
 
 def cry_theta_face_size(cry):
-    return np.sqrt(np.min(
+    return np.sqrt(np.min([
         distance_sq_bw_line_and_point(cry[4], cry[5], cry[6]),
         distance_sq_bw_line_and_point(cry[4], cry[5], cry[7])
-    ))
+    ]))
 
 def cry_phi_face_size(cry):
-    return np.sqrt(np.min(
+    return np.sqrt(np.min([
         np.sum((cry[4] - cry[5])**2),
         np.sum((cry[6] - cry[7])**2),
-    ))
+    ]))
 
 def build_crystal(x, q, i, l, nphi, barrel=True, splitlvl=1):
     dphi0 = np.pi / nphi
     cdphi0 = np.cos(dphi0 / splitlvl)
     sdphi0 = np.sin(dphi0 / splitlvl)
     tpsih1 = q**i
-    tpsih2 = tpsih1 * q
 
     psi1 = 2. * np.arctan(tpsih1)
-    psi2 = 2. * np.arctan(tpsih2)
+    psi2 = 2. * np.arctan(tpsih1 * q)
 
     if barrel:
         th1 = np.arctan(np.tan(psi1) / cdphi0) if i else 0.5 * np.pi
     else:  # endcap
-        psi1 = 0.5 * np.pi - psi2  # swap!
-        psi2 = 0.5 * np.pi - psi1
+        psi1, psi2 = [0.5 * np.pi - p for p in [psi2, psi1]]  # swap!
         if splitlvl != 1:
             # correction psi if there was a sector splitting
-            psi1 = np.arctan(np.tan(psi1) * cdphi0 / np.cos(dphi0))
-            psi2 = np.arctan(np.tan(psi2) * cdphi0 / np.cos(dphi0))
+            psi1, psi2 = [np.arctan(np.tan(p) * cdphi0 / np.cos(dphi0))
+                          for p in [psi2, psi1]]
         th1 = np.arctan(np.tan(psi1) / cdphi0)
     th2 = np.arctan(np.tan(psi2) / cdphi0)
+
+    print(f'th1 {th1:.3f} th2 {th2:.3f} psi1 {psi1:.3f} psi2 {psi2:.3f}')
 
     psiax = 0.5 * (psi1 + psi2)
     sth1, sth2 = np.sin(th1), np.sin(th2)
@@ -62,26 +66,26 @@ def build_crystal(x, q, i, l, nphi, barrel=True, splitlvl=1):
     taup2 = np.array([-sdphi0 * sth2, cdphi0 * sth2, cth2])
     taum1 = np.array([-taup1[0], taup1[1], taup1[2]])
     taum2 = np.array([-taup2[0], taup2[1], taup2[2]])
-    
-    # axis direction
-    tauax = np.array([0., np.sin(psiax), np.cos(psiax)])
+    tauax = np.array([0., np.sin(psiax), np.cos(psiax)])  # axis direction
 
     # the distance from the origin to the crystal front face
     s = x * (tauax @ tau2) / spsi2 if barrel else\
-        x * (tauax @ tau1) / spsi1
+        x * (tauax @ tau1) / cpsi1
     
     tauaxtau1 = tauax @ taum1
     tauaxtau2 = tauax @ taum2
     # natural parameter along tau_p, giving the position of crystal vertex at front face
-    s1 = s / tauaxtau1
-    s2 = s / tauaxtau2
+    s1f = s / tauaxtau1
+    s2f = s / tauaxtau2
     # natural parameter along tau_p, giving the position of crystal vertex at back face
     s1b = (s + l) / tauaxtau1
     s2b = (s + l) / tauaxtau2
 
     cry = np.vstack([
-        taum1 * s1, taup1 * s1, taum2 * s2, taup2 * s2,
-        taum1 * s1b, taup1 * s1b, taum2 * s2b, taup2 * s2b
+        taum1 * s1f, taup1 * s1f,
+        taum2 * s2f, taup2 * s2f,
+        taum1 * s1b, taup1 * s1b,
+        taum2 * s2b, taup2 * s2b
     ])
 
     if not barrel and cry_phi_face_size(cry) / cry_theta_face_size(cry) > 4.:
@@ -127,33 +131,6 @@ def crystal_axis(cry):
     ])
 
 
-def generate_barrel_ecl(rho, z0, l, r0, nphi, ntheta):
-    q = make_q(z0, rho, ntheta)
-    d = 2. * rho * (1 - q) / (1 + q)
-    d_central_half = 0.5 * d * (1. + l / rho)  # width of central ring on theta
-    # recalculating with z0 -> z0-d_central_half to allow the fit exactly in z0
-    q = make_q(z0 - d_central_half, rho, ntheta)
-
-    tanf2 = np.tan(np.pi / nphi)
-
-    offset = np.array([r0, 0., 0.])
-    phivec = np.linspace(0, 2.*np.pi, nphi)
-
-    crystal = make_crystal(rho, tanf2, d_central_half, l)
-    rotators = [transform.Rotation.from_euler('z', iphi, degrees=False)
-                for iphi in phivec]
-    crystals = [phirot.apply(crystal + offset) for phirot in rotators]
-    
-    offset = np.array([r0, 0., d_central_half])
-    for itheta in range(ntheta):
-        cry = build_crystal(rho, q, itheta, l, nphi)[0] + offset
-        for phirot in rotators:
-            cry0 = phirot.apply(cry)
-            crystals += [cry0, reflectz(cry0)]
-
-    return np.array(crystals)
-
-
 def vec_phi(v):
     return np.arctan2(v[1], v[0])
 
@@ -174,15 +151,19 @@ def closest_approach_point(line1, line2):
     dirdot = dir1 @ dir2
     assert np.sum(np.cross(dir1, dir2)**2) > 1e-8
     return line1[0] + dir1 * (
-        (line1[0] - line2[0]) @ (dirdot * dir2 - dir1) / (1. - dirdot**2)
+        (line1[0] - line2[0]) @ (dir2 * dirdot - dir1) / (1. - dirdot**2)
     )
 
 
 def split_endcap_crystal(cry, splitlvl):
-    dphi = delta_phi(cry[5] - cry[1], cry[4] - cry[0])
-    phiax = vec_phi(crystal_axis(cry))
-    print(phiax)
+    if splitlvl == 1:
+        return [cry]
+
+    dphi = np.abs(delta_phi(cry[5] - cry[1], cry[4] - cry[0]))
+    cryax = crystal_axis(cry)
+    phiax = vec_phi(cryax[1] - cryax[0])
     focus = closest_approach_point((cry[0], cry[4]), (cry[1], cry[5]))
+    print(f'focus {focus}')
     lines = [(cry[2 * i], cry[2 * i + 1]) for i in range(4)]
 
     segment = []
@@ -191,12 +172,15 @@ def split_endcap_crystal(cry, splitlvl):
         for j in range(4):
             scry[2 * j] = (cry[2 * j] if spl else cry[2 * j + 1])
     
-        phinorm = phiax - 0.5 * np.pi - dphi * (0.5 + (spl + 1) / splitlvl)
-        print(phinorm)
+        phinorm = phiax - 0.5 * np.pi - dphi * (0.5 - (spl + 1) / splitlvl)
+        print(f'phiax {phiax:.3f} phinorm {phinorm:.3f}')
         plane = (focus, np.array([np.cos(phinorm), np.sin(phinorm), 0.]))
         scry[1::2] = np.vstack([plane_cross_line(plane, item).reshape(-1, 3)
                                 for item in lines])
         segment.append(scry)
+    print(cry)
+    for item in segment:
+        print(item)
     return np.array(segment)
 
 
@@ -208,30 +192,61 @@ def plane_cross_line(plane, line):
     return line[0] + dire * unorm @ (plane[0] - line[0]) / (dire @ unorm)
 
 
+def generate_barrel_ecl(rho, z0, l, r0, nphi, ntheta):
+    q = make_q(z0 / rho, ntheta)
+    d_central_half = rho * (1 - q) / (1 + q) * (1. + l / rho)  # width of central ring on theta
+    # recalculating with z0 -> z0-d_central_half to allow the fit exactly in z0
+    q = make_q((z0 - d_central_half) / rho, ntheta)
+    tanf2 = np.tan(np.pi / nphi)
+
+    offset = np.array([r0, 0., 0.])
+    crystal = make_crystal(rho, tanf2, d_central_half, l)
+    rotators = [transform.Rotation.from_euler('z', iphi, degrees=False)
+                for iphi in np.linspace(0, 2.*np.pi, nphi)]
+    crystals = [phirot.apply(crystal + offset) for phirot in rotators]
+    
+    offset = np.array([r0, 0., d_central_half])
+    for itheta in range(ntheta):
+        cry = build_crystal(rho, q, itheta, l, nphi)[0] + offset
+        for phirot in rotators:
+            cry0 = phirot.apply(cry)
+            crystals += [cry0, reflectz(cry0)]
+
+    return np.array(crystals)
+
+
 def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
-    phivec = np.linspace(0, 2.*np.pi, nphi)
     dphi = np.pi / nphi
     ymax = rho * np.cos(dphi)
-    q = make_q(ymax, rho, ntheta)
-    d = 2. * z0 * (1 - q) / (1 + q)
-    q = make_q(ymax - d, rho, ntheta)
+    q = make_q(ymax / z0, ntheta)
+    dhalf = z0 * (1 - q) / (1 + q)
+    q = make_q(ymax / (z0 - dhalf), ntheta)
 
-    offset = np.array([r0, 0, 0.5 * d])
+    offset = np.array([r0, 0, dhalf])
     lendcap, rendcap = [], []
     for ith in range(1, ntheta):
-        cry, splitlvl = build_crystal(z0 - 0.5 * d, q, ith, l, nphi)
-        print(f'theta {ith}: split {splitlvl}')
-        rot0 = -dphi / splitlvl + dphi
+        cry, splitlvl = build_crystal(z0 - dhalf, q, ith, l, nphi, barrel=False)
+        cry += offset  # defocusing
+        # print(f'theta {ith}: split {splitlvl}')
+        
+        # for i in range(8):
+        #     print(f'   [{cry[i, 0]:+9.3f}, {cry[i, 1]:+9.3f}, {cry[i, 2]:+9.3f}]')
+        # print(cry)
         if cry[2, 1] < rhoin:
             continue
-        cry += offset  # defocusing
 
+        # rendcap.append(cry)
+        # lendcap.append(reflectz(cry))
+
+        rot0 = -dphi / splitlvl + dphi
         for spl in range(splitlvl):
-            for phi in phivec:
+            for phi in np.linspace(0, 2.*np.pi, nphi):
                 rotangle = rot0 - dphi * spl / splitlvl
                 rotator = transform.Rotation.from_euler('z', rotangle)
                 cry0 = rotator.apply(cry)
                 segment = split_endcap_crystal(cry0, splitlvl)
+                if splitlvl > 1:
+                    return [], []
                 for segcry in segment:
                     lsegcry = reflectz(segcry)
                     rotator = transform.Rotation.from_euler('z', phi)
@@ -268,6 +283,7 @@ if __name__ == '__main__':
         cfg['n_theta_half_crystals_bar'],
     )
 
+    print('Endcap')
     lendcap, rendcap = generate_endcap_ecl(
         cfg['r_internal_bar'],
         cfg['z_calorimeter_end'],
@@ -278,9 +294,12 @@ if __name__ == '__main__':
         cfg['r_internal_end'],
     )
 
-    np.save('barrel', barrel)
+    # np.save('barrel', barrel)
 
+    # print(lendcap[50])
     print(lendcap.shape)
     print(rendcap.shape)
-    # xy_calo_plot(barrel)
-    # plt.show()
+    # xy_calo_plot(rendcap)
+    encap_plot(rendcap, False)
+    encap_plot(lendcap, True)
+    plt.show()
