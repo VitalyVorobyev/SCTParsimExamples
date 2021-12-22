@@ -1,8 +1,8 @@
+from timeit import default_timer as timer
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import transform
-from caloplot import xy_calo_plot, encap_plot
-
+from caloplot import sweep_barrel_calo_plot, encap_plot
 
 def make_q(x, ntheta):
     return (np.hypot(x, 1.) - x)**(1. / ntheta)
@@ -265,6 +265,8 @@ cfg = {
 
 
 if __name__ == '__main__':
+    print('Generating barrel... ', end='')
+    s0 = timer()
     barrel = generate_barrel_ecl(
         cfg['r_internal_bar'],
         cfg['z_calorimeter_bar'],
@@ -273,7 +275,11 @@ if __name__ == '__main__':
         cfg['n_phi_crystals_bar'],
         cfg['n_theta_half_crystals_bar'],
     )
+    s1 = timer()
+    print(f'{s1 - s0:.3f} seconds')
 
+    print('Generating endcap... ', end='')
+    s0 = timer()
     lendcap, rendcap, endcapmap = generate_endcap_ecl(
         cfg['r_internal_bar'],
         cfg['z_calorimeter_end'],
@@ -283,13 +289,25 @@ if __name__ == '__main__':
         cfg['n_theta_half_crystals_bar'],
         cfg['r_internal_end'],
     )
+    s1 = timer()
+    print(f'{s1 - s0:.3f} seconds')
 
     # np.save('barrel', barrel)
 
     # print(lendcap[50])
     # print(lendcap.shape)
     # print(rendcap.shape)
-    xy_calo_plot(barrel)
+    print('Barrel plot')
+    s0 = timer()
+    sweep_barrel_calo_plot(barrel)
+    s1 = timer()
+    print(f'{s1 - s0:.3f} seconds')
+
+    print('Endcap plot')
+    s0 = timer()
     encap_plot(rendcap, False)
+    s1 = timer()
+    print(f'{s1 - s0:.3f} seconds')
+
     # encap_plot(lendcap, True)
     plt.show()
