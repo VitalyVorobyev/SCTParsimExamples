@@ -45,13 +45,19 @@ def encap_plot(crys, left=False):
     plt.grid(which='major')
     plt.grid(which='minor', linestyle=':')
 
-    perm = [3, 2, 0, 1, 3] if left else\
-           [2, 3, 1, 0, 2, 6, 7, 5, 4, 6]
+    permf = [3, 2, 0, 1, 3] if left else\
+            [2, 3, 1, 0, 2]
+
+    permb = [6, 7, 5, 4, 6]
 
     for cry in crys:
         col = next(colit)
-        cxy = cry[perm]
-        plt.plot(cxy[:, 0], cxy[:, 1], color=col)
+        cxyf, cxyb = cry[permf], cry[permb]
+        plt.plot(cxyf[:, 0], cxyf[:, 1], color=col)
+        # plt.plot(cxyb[:, 0], cxyb[:, 1], color=col)
+        # col = next(colit)
+        # for i, j in zip(permf, permb):
+        #     plt.plot([cxyf[i, 0], cxyb[i, 0]], [cxyf[i, 1], cxyb[i, 1]], color=col)
         # break
 
     plt.tight_layout()
@@ -85,8 +91,8 @@ clus = np.array([
      [  17.13600181,  855.28969654, 1551.18036861]],
 ])
 
-encap_plot(clus[1:])
-plt.show()
+# encap_plot(clus[::-1])
+# plt.show()
 
 
 # [[ -40.77919325  364.22973665 1290.        ]
