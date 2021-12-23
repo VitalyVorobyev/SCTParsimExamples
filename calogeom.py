@@ -169,6 +169,34 @@ def plane_cross_line(plane, line):
     return line[0] + dire * ((plane[0] - line[0]) @ norm) / (dire @ norm)
 
 
+def plane_from_three_points(p1, p2, p3):
+    """ returns plane defined by point and normal """
+    return (p2, np.cross(p1 - p2, p3 - p2))
+
+
+def unit_vec(vec):
+    return vec / np.sqrt(np.sum(vec**2))
+
+
+def distance_to_point(plane, point):
+    """ plane = (vec, norm) """
+    norm = unit_vec(plane[1])
+    return np.abs(norm @ (point - plane[0]))
+
+
+def is_point_in_triangle(triangle, point):
+    """ triangle = (t0, t1, t2) """
+    u = triangle[1] - triangle[0]
+    v = triangle[2] - triangle[0]
+    n = np.cross(u, v)
+    n /= n @ n
+    w = point - triangle[0]
+    gamma = np.cross(u, w) @ n
+    beta = np.cross(w, v) @ n
+    alpha = 1. - gamma - beta
+    return np.all([x >= 0. and x << 1 for x in [alpha, beta, gamma]])
+
+
 def closest_approach_point(line1, line2):
     """ line1 = (s1, t1), line2 = (s2, t2) """
     dir1, dir2 = [x[1] - x[0] for x in [line1, line2]]
@@ -203,8 +231,6 @@ def generate_barrel_ecl(rho, z0, l, r0, nphi, ntheta):
 
 
 def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
-    endcapmap = {}
-
     dphi = np.pi / nphi
     ymax = rho * np.cos(dphi)
     q = make_q(ymax / z0, ntheta)
@@ -212,7 +238,7 @@ def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
     q = make_q(ymax / (z0 - dhalf), ntheta)
 
     offset = np.array([r0, 0, dhalf])
-    lendcap, rendcap = [], []
+    endcap = [[] for _ in range(ntheta-1)]  # segments
     for ith in range(1, ntheta):
         cry, splitlvl = build_crystal(z0 - dhalf, q, ith, l, nphi, barrel=False)
         cry += offset  # defocusing
@@ -220,32 +246,55 @@ def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
             continue
 
         rot0 = -dphi / splitlvl + dphi
+        endcap[ith - 1] = [[] for _ in range(splitlvl)]  # subsectors
         for spl in range(splitlvl):
+            endcap[ith - 1][spl] = [[] for _ in range(nphi)]  # sectors
             for iphi, phi in enumerate(np.linspace(0, 2.*np.pi, nphi)):
                 rotangle = rot0 - 2. * dphi * spl / splitlvl
                 rotator = transform.Rotation.from_euler('z', rotangle)
                 cry0 = rotator.apply(cry)
                 segment = split_endcap_crystal(cry0)
+                endcap[ith - 1][spl][iphi] = [[] for _ in range(len(segment))]  # crystals
                 for icry, segcry in enumerate(segment):
                     lsegcry = reflectz(segcry)
                     rotator = transform.Rotation.from_euler('z', phi)
-                    rcry, lcry = [rotator.apply(x) for x in [segcry, lsegcry]]
-                    endcapmap[rcry.tobytes()] = (iphi, spl, ith, icry, 'r')
-                    endcapmap[lcry.tobytes()] = (iphi, spl, ith, icry, 'l')
-                    rendcap.append(rcry)
-                    lendcap.append(lcry)
+                    endcap[ith - 1][spl][iphi][icry] = (
+                        rotator.apply(segcry), rotator.apply(lsegcry))
 
-    return np.array(lendcap), np.array(rendcap), endcapmap
+    return fill_endcap_gaps(endcap)
 
 
-def fill_endcap_gaps(endcap, endcapmap):
-    for cry1 in endcap:
-        info1 = endcapmap[cry1.tobytes()]
-        for cry2 in endcap:
-            pass
+def fill_endcap_gaps(endcap):
+    lendcap, rendcap, endcapmap = [], [], {}
+    for sec1, sec2 in zip(endcap[:-1], endcap[1:]):
+        for sseg1, sseg2 in zip(sec1, sec2):
+            for seg1, seg2 in zip(sseg1, sseg2):
+                for cry1, cry2 in zip(seg1, seg2):
+                    cry1, cry2 = adjust_crystalls(cry1, cry2)
+    return lendcap, rendcap, endcapmap
 
 
+def adjust_crystalls(cry1, cry2):
+    """ segment(cry1) + 1= segment(cry2) """
+    sigma = plane_from_three_points(cry1[0], cry1[1], cry1[4])
+    midline = (
+        np.mean(cry2[[0, 1, 4, 5]], axis=1),
+        np.mean(cry2[[2, 3, 6, 7]], axis=1)
+    )
+    crosspoint = plane_cross_line(sigma, midline)
+    zeta = plane_from_three_points(v2[2], v2[3], v2[6])
+    if distance_to_point(zeta, crosspoint) < 1.e-8:
+        return cry1, cry2
 
+    cro1 = is_point_in_triangle((cry1[0], cry1[1], cry1[4]), crosspoint)
+    cro2 = is_point_in_triangle((cry1[1], cry1[4], cry1[5]), crosspoint)
+    if not cro1 and not cro2:
+        return cry1, cry2
+    
+    for vtx, (d1, d2) in zip([2, 3, 6, 7], [(2, 0), (3, 1), (6, 4), (7, 5)]):
+        cry1[vtx] = plane_cross_line(sigma, (cry2[d1], cry2[d2]))
+
+    return cry1, cry2
 
 cfg = {
     'crystal_length': 330,
@@ -265,7 +314,7 @@ cfg = {
 
 
 if __name__ == '__main__':
-    print('Generating barrel... ', end='')
+    print('Generating barrel...', end=' ')
     s0 = timer()
     barrel = generate_barrel_ecl(
         cfg['r_internal_bar'],
@@ -278,7 +327,7 @@ if __name__ == '__main__':
     s1 = timer()
     print(f'{s1 - s0:.3f} seconds')
 
-    print('Generating endcap... ', end='')
+    print('Generating endcap...', end=' ')
     s0 = timer()
     lendcap, rendcap, endcapmap = generate_endcap_ecl(
         cfg['r_internal_bar'],
@@ -294,16 +343,13 @@ if __name__ == '__main__':
 
     # np.save('barrel', barrel)
 
-    # print(lendcap[50])
-    # print(lendcap.shape)
-    # print(rendcap.shape)
-    print('Barrel plot')
+    print('Barrel plot', end=' ')
     s0 = timer()
     sweep_barrel_calo_plot(barrel)
     s1 = timer()
     print(f'{s1 - s0:.3f} seconds')
 
-    print('Endcap plot')
+    print('Endcap plot', end=' ')
     s0 = timer()
     encap_plot(rendcap, False)
     s1 = timer()
