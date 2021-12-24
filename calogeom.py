@@ -1,4 +1,5 @@
 from timeit import default_timer as timer
+import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import transform
@@ -194,7 +195,7 @@ def is_point_in_triangle(triangle, point):
     gamma = np.cross(u, w) @ n
     beta = np.cross(w, v) @ n
     alpha = 1. - gamma - beta
-    return np.all([x >= 0. and x << 1 for x in [alpha, beta, gamma]])
+    return np.all([x >= 0. and x <= 1. for x in [alpha, beta, gamma]])
 
 
 def closest_approach_point(line1, line2):
@@ -238,7 +239,7 @@ def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
     q = make_q(ymax / (z0 - dhalf), ntheta)
 
     offset = np.array([r0, 0, dhalf])
-    endcap = [[] for _ in range(ntheta-1)]  # segments
+    endcap = [[[] for _ in range(nphi)] for _ in range(ntheta - 1)]  # segments
     for ith in range(1, ntheta):
         cry, splitlvl = build_crystal(z0 - dhalf, q, ith, l, nphi, barrel=False)
         cry += offset  # defocusing
@@ -246,55 +247,83 @@ def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
             continue
 
         rot0 = -dphi / splitlvl + dphi
-        endcap[ith - 1] = [[] for _ in range(splitlvl)]  # subsectors
         for spl in range(splitlvl):
-            endcap[ith - 1][spl] = [[] for _ in range(nphi)]  # sectors
             for iphi, phi in enumerate(np.linspace(0, 2.*np.pi, nphi)):
                 rotangle = rot0 - 2. * dphi * spl / splitlvl
                 rotator = transform.Rotation.from_euler('z', rotangle)
                 cry0 = rotator.apply(cry)
                 segment = split_endcap_crystal(cry0)
-                endcap[ith - 1][spl][iphi] = [[] for _ in range(len(segment))]  # crystals
                 for icry, segcry in enumerate(segment):
                     lsegcry = reflectz(segcry)
                     rotator = transform.Rotation.from_euler('z', phi)
-                    endcap[ith - 1][spl][iphi][icry] = (
-                        rotator.apply(segcry), rotator.apply(lsegcry))
+                    endcap[ith - 1][iphi].append((rotator.apply(segcry), rotator.apply(lsegcry)))
 
     return fill_endcap_gaps(endcap)
 
 
 def fill_endcap_gaps(endcap):
-    lendcap, rendcap, endcapmap = [], [], {}
-    for sec1, sec2 in zip(endcap[:-1], endcap[1:]):
-        for sseg1, sseg2 in zip(sec1, sec2):
-            for seg1, seg2 in zip(sseg1, sseg2):
-                for cry1, cry2 in zip(seg1, seg2):
-                    cry1, cry2 = adjust_crystalls(cry1, cry2)
-    return lendcap, rendcap, endcapmap
+    lendcap, rendcap = [], []
+    for sector in endcap[-1]:
+        for lcry, rcry in sector:
+            lendcap.append(lcry)
+            rendcap.append(rcry)
+    for segment1, segment2 in zip(endcap[:-1], endcap[1:]):
+        for sector1, sector2 in zip(segment1, segment2):
+            for cry1r, cry1l in sector1:
+                for cry2r, cry2l in sector2:
+                    # cry1l = adjust_crystal(cry1l, cry2l)
+                    cry1r = adjust_crystal(cry1r, cry2r)
+                lendcap.append(cry1l)
+                rendcap.append(cry1r)
+    return np.array(lendcap), np.array(rendcap)
 
 
-def adjust_crystalls(cry1, cry2):
+def adjust_crystal(cry1, cry2):
     """ segment(cry1) + 1= segment(cry2) """
-    sigma = plane_from_three_points(cry1[0], cry1[1], cry1[4])
+    # return cry2
+
+    for i in [0, 1, 2, 3]:
+        try:
+            assert np.sum(cry1[i,:-1]**2) < np.sum(cry1[i + 4,:-1]**2)
+            assert np.sum(cry2[i,:-1]**2) < np.sum(cry2[i + 4,:-1]**2)
+            assert cry1[i, -1] < cry1[i + 4, -1]
+            assert cry2[i, -1] < cry2[i + 4, -1]
+        except:
+            print(i, cry1[i], cry1[i + 4])
+            print(i, cry2[i], cry2[i + 4])
+
+    t1, t2 = cry1.copy(), cry2
+    # t1, t2 = t2, t1
+    sigma = plane_from_three_points(t2[0], t2[1], t2[4])
     midline = (
-        np.mean(cry2[[0, 1, 4, 5]], axis=1),
-        np.mean(cry2[[2, 3, 6, 7]], axis=1)
+        np.mean(t1[[0, 1, 4, 5]], axis=0),
+        np.mean(t1[[2, 3, 6, 7]], axis=0)
     )
     crosspoint = plane_cross_line(sigma, midline)
-    zeta = plane_from_three_points(v2[2], v2[3], v2[6])
-    if distance_to_point(zeta, crosspoint) < 1.e-8:
-        return cry1, cry2
+    zeta = plane_from_three_points(t1[2], t1[3], t1[6])
+    dist = distance_to_point(zeta, crosspoint)
+    if dist < 1.e-8:
+        # print(dist)
+        return cry1
 
-    cro1 = is_point_in_triangle((cry1[0], cry1[1], cry1[4]), crosspoint)
-    cro2 = is_point_in_triangle((cry1[1], cry1[4], cry1[5]), crosspoint)
+    cro1 = is_point_in_triangle((t2[0], t2[1], t2[4]), crosspoint)
+    cro2 = is_point_in_triangle((t2[1], t2[4], t2[5]), crosspoint)
     if not cro1 and not cro2:
-        return cry1, cry2
-    
-    for vtx, (d1, d2) in zip([2, 3, 6, 7], [(2, 0), (3, 1), (6, 4), (7, 5)]):
-        cry1[vtx] = plane_cross_line(sigma, (cry2[d1], cry2[d2]))
+        # print('not cro1 and not cro2')
+        return cry1
 
-    return cry1, cry2
+    for ic, jc in zip(t1, t2):
+        print('b', ic, jc)
+
+    for vtx, d in zip([2, 3, 6, 7], [0, 1, 4, 5]):
+        t1[vtx] = plane_cross_line(sigma, (t1[d], t1[d + 2]))
+    
+    for ic, jc in zip(t1, t2):
+        print('a', ic, jc)
+
+    print('updated')
+    return t1
+
 
 cfg = {
     'crystal_length': 330,
@@ -329,7 +358,7 @@ if __name__ == '__main__':
 
     print('Generating endcap...', end=' ')
     s0 = timer()
-    lendcap, rendcap, endcapmap = generate_endcap_ecl(
+    lendcap, rendcap = generate_endcap_ecl(
         cfg['r_internal_bar'],
         cfg['z_calorimeter_end'],
         cfg['crystal_length'],
@@ -343,11 +372,11 @@ if __name__ == '__main__':
 
     # np.save('barrel', barrel)
 
-    print('Barrel plot', end=' ')
-    s0 = timer()
-    sweep_barrel_calo_plot(barrel)
-    s1 = timer()
-    print(f'{s1 - s0:.3f} seconds')
+    # print('Barrel plot', end=' ')
+    # s0 = timer()
+    # sweep_barrel_calo_plot(barrel)
+    # s1 = timer()
+    # print(f'{s1 - s0:.3f} seconds')
 
     print('Endcap plot', end=' ')
     s0 = timer()
@@ -357,3 +386,16 @@ if __name__ == '__main__':
 
     # encap_plot(lendcap, True)
     plt.show()
+
+
+# b [ -12.778  594.112 1312.568] [ -37.260  691.859 1265.817]
+# a [ -15.684  646.790 1287.069] [ -37.260  691.859 1265.817]
+
+# b [ -79.139  594.112 1312.568] [ -94.452  687.120 1265.817]
+# a [ -87.139  642.048 1289.364] [ -94.452  687.120 1265.817]
+
+# b [ -20.411  732.462 1612.227] [ -50.550  852.245 1553.976]
+# a [ -23.977  797.099 1580.939] [ -50.550  852.245 1553.976]
+
+# b [-102.226  732.462 1612.227] [-121.032  846.404 1553.976]
+# a [-112.037  791.255 1583.768] [-121.032  846.404 1553.976]
