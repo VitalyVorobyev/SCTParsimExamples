@@ -3,7 +3,7 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import transform
-from caloplot import sweep_barrel_calo_plot, encap_plot
+from caloplot import sweep_barrel_calo_plot, encap_plot, adjust_plot
 
 def make_q(x, ntheta):
     return (np.hypot(x, 1.) - x)**(1. / ntheta)
@@ -40,10 +40,10 @@ def build_crystal(x, q, i, l, nphi, barrel=True, splitlvl=1):
     if barrel:
         th1 = np.arctan(np.tan(psi1) / cdphi0) if i else 0.5 * np.pi
     else:  # endcap
-        psi1, psi2 = [0.5 * np.pi - p for p in [psi2, psi1]]  # swap!
+        psi1, psi2 = [0.5 * np.pi - p for p in [psi1, psi2]]  # swap!
         if splitlvl != 1:  # correction if sector is splitted
             psi1, psi2 = [np.arctan(np.tan(p) * cdphi0 / np.cos(dphi0))
-                          for p in [psi2, psi1]]
+                          for p in [psi1, psi2]]
         th1 = np.arctan(np.tan(psi1) / cdphi0)
     th2 = np.arctan(np.tan(psi2) / cdphi0)
 
@@ -165,8 +165,9 @@ def split_endcap_crystal(cry):
 
 
 def plane_cross_line(plane, line):
-    """ plane = (vec, norm), line = (s, t) """
+    """ plane = (point, norm), line = (s, t) """
     dire, norm = line[1] - line[0], plane[1]
+    dire, norm = [x / np.sqrt(np.sum(x**2)) for x in [dire, norm]]
     return line[0] + dire * ((plane[0] - line[0]) @ norm) / (dire @ norm)
 
 
@@ -253,10 +254,10 @@ def generate_endcap_ecl(rho, z0, l, r0, nphi, ntheta, rhoin):
                 rotator = transform.Rotation.from_euler('z', rotangle)
                 cry0 = rotator.apply(cry)
                 segment = split_endcap_crystal(cry0)
-                for icry, segcry in enumerate(segment):
-                    lsegcry = reflectz(segcry)
+                for segcry in segment:
                     rotator = transform.Rotation.from_euler('z', phi)
-                    endcap[ith - 1][iphi].append((rotator.apply(segcry), rotator.apply(lsegcry)))
+                    endcap[ith - 1][iphi].append((
+                        rotator.apply(segcry), rotator.apply(reflectz(segcry))))
 
     return fill_endcap_gaps(endcap)
 
@@ -278,22 +279,8 @@ def fill_endcap_gaps(endcap):
     return np.array(lendcap), np.array(rendcap)
 
 
-def adjust_crystal(cry1, cry2):
+def adjust_crystal(t1, t2):
     """ segment(cry1) + 1= segment(cry2) """
-    # return cry2
-
-    for i in [0, 1, 2, 3]:
-        try:
-            assert np.sum(cry1[i,:-1]**2) < np.sum(cry1[i + 4,:-1]**2)
-            assert np.sum(cry2[i,:-1]**2) < np.sum(cry2[i + 4,:-1]**2)
-            assert cry1[i, -1] < cry1[i + 4, -1]
-            assert cry2[i, -1] < cry2[i + 4, -1]
-        except:
-            print(i, cry1[i], cry1[i + 4])
-            print(i, cry2[i], cry2[i + 4])
-
-    t1, t2 = cry1.copy(), cry2
-    # t1, t2 = t2, t1
     sigma = plane_from_three_points(t2[0], t2[1], t2[4])
     midline = (
         np.mean(t1[[0, 1, 4, 5]], axis=0),
@@ -303,25 +290,20 @@ def adjust_crystal(cry1, cry2):
     zeta = plane_from_three_points(t1[2], t1[3], t1[6])
     dist = distance_to_point(zeta, crosspoint)
     if dist < 1.e-8:
-        # print(dist)
-        return cry1
+        return t1
 
     cro1 = is_point_in_triangle((t2[0], t2[1], t2[4]), crosspoint)
     cro2 = is_point_in_triangle((t2[1], t2[4], t2[5]), crosspoint)
     if not cro1 and not cro2:
-        # print('not cro1 and not cro2')
-        return cry1
-
-    for ic, jc in zip(t1, t2):
-        print('b', ic, jc)
+        return t1
 
     for vtx, d in zip([2, 3, 6, 7], [0, 1, 4, 5]):
         t1[vtx] = plane_cross_line(sigma, (t1[d], t1[d + 2]))
-    
-    for ic, jc in zip(t1, t2):
-        print('a', ic, jc)
 
-    print('updated')
+    if False:    
+        adjust_plot(t2, cry1, t1, sigma)
+        plt.show()
+        assert False
     return t1
 
 
